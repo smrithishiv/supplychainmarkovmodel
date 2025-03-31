@@ -1,67 +1,81 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
 
-df = pd.read_csv("csv/labelledmatrix.csv", header=0, index_col=0)
-P = df.to_numpy()
+P = pd.read_csv('outputs/initial_model.csv', index_col=0).values
+volume_states = np.arange(0, 1850, 50)  # 0 to 1800 in 50-step increments
+n_states = len(volume_states)
 
-# === Load steady-state probabilities ===
-steady_state_df = pd.read_csv("csv/steady_state_probabilities.csv")
-π = steady_state_df['Probability'].to_numpy()
+# --- Cost Parameters ---
+k_per_m3 = 120                          # Variable shipment cost per m³
+K1 = 150                                # 900 ft³ truck cost
+K2 = 200                                # 1800 ft³ truck cost
+c = 0.10 * k_per_m3                     # Holding cost per m³ per day
+holding_cost_per_cuft_per_day = c / 35.3147  # Convert m³ to ft³
 
-# === Extract volumes directly from transition matrix ===
-volumes = df.columns.astype(int).tolist()  # Extract volume labels from the columns
+thresholds = np.arange(0, 1800 + 50, 50)
 
-holding_cost_per_m3 = 12  # $/m³/day
-shipment_cost_3pl = 800    # $ for 3PL shipment
-K1 = 190                  # $ for 900 ft³ truck
-K2 = 200                  # $ for 1800 ft³ truck
+# --- Steady State Distribution ---
+eigvals, eigvecs = np.linalg.eig(P.T)
+steady_state = np.real(eigvecs[:, np.isclose(eigvals, 1)])
+steady_state = steady_state[:, 0]
+steady_state = steady_state / steady_state.sum()
 
-# Function to calculate expected cost for a given threshold
-def calculate_expected_cost(threshold):
-    expected_cost_3pl = 0
-    expected_cost_k1 = 0
-    expected_cost_k2 = 0
-    shipment_frequency_3pl = 0
-    shipment_frequency_k1 = 0
-    shipment_frequency_k2 = 0
-    
-    # Iterate through volume levels and compute costs
-    for vol_ft3 in range(50, 1801, 50):
-        vol_m3 = vol_ft3 * (1 / 35.31)
-        holding_cost = vol_m3 * holding_cost_per_m3
+# --- Results Storage ---
+results = []
 
-        # Determine shipment cost based on threshold
-        if vol_ft3 >= threshold:
-            expected_cost_3pl += π[vol_ft3 // 50 - 1] * (holding_cost + shipment_cost_3pl)
-            shipment_frequency_3pl += π[vol_ft3 // 50 - 1]
-            
-            if vol_ft3 <= 900:
-                expected_cost_k1 += π[vol_ft3 // 50 - 1] * (holding_cost + K1)
-                shipment_frequency_k1 += π[vol_ft3 // 50 - 1]
-            elif vol_ft3 <= 1800:
-                expected_cost_k2 += π[vol_ft3 // 50 - 1] * (holding_cost + K2)
-                shipment_frequency_k2 += π[vol_ft3 // 50 - 1]
-        else:
-            expected_cost_3pl += π[vol_ft3 // 50 - 1] * holding_cost
-            expected_cost_k1 += π[vol_ft3 // 50 - 1] * holding_cost
-            expected_cost_k2 += π[vol_ft3 // 50 - 1] * holding_cost
-    
-    return expected_cost_3pl, expected_cost_k1, expected_cost_k2
-
-# Iterate over possible thresholds and calculate expected costs
-thresholds = list(range(50, 1801, 50))
-costs = []
 for threshold in thresholds:
-    cost_3pl, cost_k1, cost_k2 = calculate_expected_cost(threshold)
-    costs.append([threshold, cost_3pl, cost_k1, cost_k2])
+    total_daily_3pl_cost = 0
+    total_daily_truck_cost = 0
+    shipment_freq = 0
 
-# Find the optimal threshold with the lowest total cost
-cost_df = pd.DataFrame(costs, columns=["Threshold (ft³)", "Cost/Day (3PL)", "Cost/Day (Truck 900ft³)", "Cost/Day (Truck 1800ft³)"])
-optimal_threshold_3pl = cost_df.loc[cost_df["Cost/Day (3PL)"].idxmin()]
-optimal_threshold_k1 = cost_df.loc[cost_df["Cost/Day (Truck 900ft³)"].idxmin()]
-optimal_threshold_k2 = cost_df.loc[cost_df["Cost/Day (Truck 1800ft³)"].idxmin()]
+    for i, v in enumerate(volume_states):
+        prob = steady_state[i]
 
-# Display optimal thresholds
-print(f"Optimal Threshold for 3PL: {optimal_threshold_3pl}")
-print(f"Optimal Threshold for 900ft³ Truck: {optimal_threshold_k1}")
-print(f"Optimal Threshold for 1800ft³ Truck: {optimal_threshold_k2}")
+        # Holding cost
+        holding_cost = v * holding_cost_per_cuft_per_day
+
+        # Shipping costs (if threshold met)
+        if v >= threshold:
+            shipment_freq += prob
+            # Choose truck size
+            if v <= 900:
+                truck_cost = K1
+            else:
+                truck_cost = K2
+
+            variable_cost = (k_per_m3 / 35.3147) * v
+        else:
+            truck_cost = 0
+            variable_cost = 0
+
+        # Accumulate daily expected costs
+        total_daily_3pl_cost += prob * (holding_cost + variable_cost)
+        total_daily_truck_cost += prob * (holding_cost + truck_cost)
+
+    results.append({
+        "Threshold": threshold,
+        "3PL_Cost": round(total_daily_3pl_cost, 2),
+        "Truck_Cost": round(total_daily_truck_cost, 2),
+        "Expected_Shipments_per_Day": round(shipment_freq, 4)
+    })
+
+# Convert to DataFrame and display
+df_results = pd.DataFrame(results)
+print(df_results)
+
+# Save to CSV
+df_results.to_csv("outputs/threshold_policy_costs.csv", index=False)
+
+# --- Plot Costs vs Threshold ---
+plt.figure(figsize=(10, 6))
+plt.plot(df_results["Threshold"], df_results["3PL_Cost"], marker='o', label="3PL Cost")
+plt.plot(df_results["Threshold"], df_results["Truck_Cost"], marker='s', label="Truck Rental Cost")
+plt.xlabel("Shipment Threshold (ft³)")
+plt.ylabel("Expected Daily Cost ($)")
+plt.title("Cost vs Shipment Threshold")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
