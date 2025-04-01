@@ -3,8 +3,6 @@ import pandas as pd
 import itertools
 import math
 from collections import defaultdict
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 # --- Parameters ---
 component_volumes = {"A": 50, "B": 100, "C": 150}
@@ -47,20 +45,26 @@ n_states = len(state_space)
 P = np.zeros((n_states, n_states))
 
 for (v, due), i in state_index.items():
-    for added_v, prob in volume_dist.items():
-        new_total = v + added_v
-        new_due = max(due - 1, 0)  # Decrease due date (closer to late)
+    if due == 1:
+        # If due == 1, force transition to (0,0)
+        j = state_index[(0, 0)]
+        P[i, j] = 1.0
+    else:
+        # Regular transitions
+        for added_v, prob in volume_dist.items():
+            new_total = v + added_v
+            new_due = max(due - 1, 0)  # Decrease due date (closer to late)
 
-        if new_total > max_volume:
-            # Ship 1800 ft³, carry over remainder
-            carryover = new_total - 900
-            carryover = min(carryover, max_volume)
-            new_state = (carryover, new_due)
-        else:
-            new_state = (new_total, new_due)
-        
-        j = state_index[new_state]
-        P[i, j] += prob
+            if new_total > max_volume:
+                # Ship 900 ft³, carry over remainder
+                carryover = new_total - 900
+                carryover = min(carryover, max_volume)
+                new_state = (carryover, new_due)
+            else:
+                new_state = (new_total, new_due)
+
+            j = state_index[new_state]
+            P[i, j] += prob
 
 # --- Step 4: Save Extended Transition Matrix ---
 df = pd.DataFrame(P, index=state_space, columns=state_space)
