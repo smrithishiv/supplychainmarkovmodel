@@ -3,15 +3,16 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import os
 
+# --- Load Transition Matrix ---
 P = pd.read_csv('outputs/initial_model.csv', index_col=0).values
 volume_states = np.arange(0, 1850, 50)  # 0 to 1800 in 50-step increments
 n_states = len(volume_states)
 
-# --- Cost Parameters ---
-k_per_m3 = 120                          # Variable shipment cost per m³
-K1 = 150                                # 900 ft³ truck cost
+# --- Cost Parameters (Updateable) ---
+k_per_m3 = 120                         # Variable shipment cost per m³
+K1 = 190                                 # 900 ft³ truck cost
 K2 = 200                                # 1800 ft³ truck cost
-c = 0.10 * k_per_m3                     # Holding cost per m³ per day
+c = 0.1 * k_per_m3                     # Holding cost per m³ per day
 holding_cost_per_cuft_per_day = c / 35.3147  # Convert m³ to ft³
 
 thresholds = np.arange(0, 1800 + 50, 50)
@@ -58,15 +59,39 @@ for threshold in thresholds:
         "Threshold": threshold,
         "3PL_Cost": round(total_daily_3pl_cost, 2),
         "Truck_Cost": round(total_daily_truck_cost, 2),
-        "Expected_Shipments_per_Day": round(shipment_freq, 4)
+        "Expected_Shipments_per_Day": round(shipment_freq, 4),
+        "k_per_m3": k_per_m3,
+        "K1": K1,
+        "K2": K2
     })
 
-# Convert to DataFrame and display
+# Convert to DataFrame
 df_results = pd.DataFrame(results)
-print(df_results)
 
-# Save to CSV
-df_results.to_csv("outputs/threshold_policy_costs.csv", index=False)
+# --- Append to CSV ---
+csv_path = "outputs/threshold_policy_costs.csv"
+
+if os.path.exists(csv_path):
+    df_existing = pd.read_csv(csv_path)
+    df_combined = pd.concat([df_existing, df_results], ignore_index=True)
+else:
+    df_combined = df_results
+
+# Save updated results
+df_combined.to_csv(csv_path, index=False)
+
+# --- Find Minimum Costs and Corresponding Thresholds ---
+df_min_3pl = df_combined.loc[df_combined.groupby(["k_per_m3", "K1", "K2"])["3PL_Cost"].idxmin(), ["k_per_m3", "K1", "K2", "Threshold", "3PL_Cost"]]
+df_min_3pl.rename(columns={"Threshold": "Best_Threshold_3PL", "3PL_Cost": "Min_3PL_Cost"}, inplace=True)
+
+df_min_truck = df_combined.loc[df_combined.groupby(["k_per_m3", "K1", "K2"])["Truck_Cost"].idxmin(), ["k_per_m3", "K1", "K2", "Threshold", "Truck_Cost"]]
+df_min_truck.rename(columns={"Threshold": "Best_Threshold_Truck", "Truck_Cost": "Min_Truck_Cost"}, inplace=True)
+
+# Merge the two summaries
+df_summary = pd.merge(df_min_3pl, df_min_truck, on=["k_per_m3", "K1", "K2"])
+
+# Save summary
+df_summary.to_csv("outputs/threshold_policy_summary.csv", index=False)
 
 # --- Plot Costs vs Threshold ---
 plt.figure(figsize=(10, 6))
@@ -79,3 +104,6 @@ plt.legend()
 plt.grid(True)
 plt.tight_layout()
 plt.show()
+
+# Display summary results
+print(df_summary)
