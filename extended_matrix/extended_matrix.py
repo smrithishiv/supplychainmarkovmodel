@@ -68,4 +68,4 @@ for (v, due), i in state_index.items():
 
 # --- Step 4: Save Extended Transition Matrix ---
 df = pd.DataFrame(P, index=state_space, columns=state_space)
-df.to_csv("outputs/extended_transition_matrix.csv")
+df.to_csv("extended_matrix_outputs/extended_transition_matrix.csv")
