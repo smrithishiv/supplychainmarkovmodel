@@ -11,7 +11,7 @@ original_K2 = 200
 original_c = 0.1 * original_k_per_m3  
 original_holding_cost_per_cuft_per_day = original_c / 35.3147  
 
-thresholds = np.arange(0, 900 + 50, 50)
+thresholds = np.arange(0, 1800 + 50, 50)
 
 # --- Random Parameter Generation ---
 def random_parameters():

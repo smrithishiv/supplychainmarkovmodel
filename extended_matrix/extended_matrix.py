@@ -10,10 +10,10 @@ component_probs = {"A": 0.3, "B": 0.5, "C": 0.2}
 lambda_orders = 2
 max_daily_production = 3
 volume_step = 50
-max_volume = 900
-max_due_days = 4  # Maximum days an order can be due before being late
+max_volume = 1800  # Extended to cover up to large truck capacity
+max_due_days = 4   # Include due days 2, 3, and 4
 
-def generate_poisson_distribution(lambda_orders, max_orders=3):
+def generate_poisson_distribution(lambda_orders, max_orders=6):
     poisson_probs = [((lambda_orders ** k) * np.exp(-lambda_orders)) / math.factorial(k) for k in range(max_orders)]
     poisson_probs.append(1 - sum(poisson_probs))  # Bucket for 6+ orders
     return poisson_probs
@@ -34,30 +34,29 @@ for n_orders, p in enumerate(poisson_probs):
                 prob *= (component_probs[c] ** combo.count(c))
         volume_dist[vol] += prob
 
-# --- Step 2: Define Extended States (Volume, Due Date) ---
-volume_states = list(range(0, max_volume + volume_step, volume_step))  # 0, 50, ..., 1800
-due_states = list(range(max_due_days + 1))  # 0, 1, ..., max_due_days
+# --- Step 2: Define Extended States (Volume, Due Days Remaining) ---
+volume_states = list(range(0, max_volume + 1, volume_step))  # 0 to 1800
+due_states = list(range(0, max_due_days + 1))  # 0 to 4
 state_space = list(itertools.product(volume_states, due_states))
 state_index = {state: i for i, state in enumerate(state_space)}
 n_states = len(state_space)
 
-# --- Step 3: Build Extended Transition Matrix ---
+# --- Step 3: Build Transition Matrix ---
 P = np.zeros((n_states, n_states))
 
 for (v, due), i in state_index.items():
     if due == 1:
-        # If due == 1, force transition to (0,0)
+        # Force shipment → reset to (0, 0)
         j = state_index[(0, 0)]
         P[i, j] = 1.0
     else:
-        # Regular transitions
         for added_v, prob in volume_dist.items():
             new_total = v + added_v
-            new_due = max(due - 1, 0)  # Decrease due date (closer to late)
+            new_due = max(due - 1, 0)  # Inventory ages by one day
 
             if new_total > max_volume:
-                # Ship 900 ft³, carry over remainder
-                carryover = new_total - 900
+                # Ship up to 1800 ft³, carry over remainder
+                carryover = new_total - 1800
                 carryover = min(carryover, max_volume)
                 new_state = (carryover, new_due)
             else:
@@ -66,6 +65,7 @@ for (v, due), i in state_index.items():
             j = state_index[new_state]
             P[i, j] += prob
 
-# --- Step 4: Save Extended Transition Matrix ---
+# --- Step 4: Save Transition Matrix ---
 df = pd.DataFrame(P, index=state_space, columns=state_space)
 df.to_csv("extended_matrix_outputs/extended_transition_matrix.csv")
+print("✅ Extended transition matrix saved successfully.")
